@@ -12,15 +12,27 @@
 //! error handling - if I would find additional time, I would do something funny.
 
 use std::io::{stdin, BufRead, BufReader};
+use structopt::clap::arg_enum;
 use structopt::StructOpt;
 
 mod bin;
 mod maze;
 
+arg_enum! {
+    #[derive(Debug)]
+    enum Alg {
+        Flood,
+        AStar,
+    }
+}
+
 #[derive(Debug, StructOpt)]
 enum Mode {
     #[structopt(about = "Finds closest path in maze (default)")]
-    Maze,
+    Maze {
+        #[structopt(short, long, possible_values = &Alg::variants(), case_insensitive = true, default_value = "flood")]
+        alg: Alg,
+    },
     #[structopt(about = "Performs BIN -> DEC convetsion")]
     Conv,
 }
@@ -52,8 +64,9 @@ fn main() {
     let mut input = BufReader::new(stdin());
     let (x, y) = read_xy(&mut input);
 
-    match opt.mode {
-        None | Some(Mode::Maze) => maze::main(x, y, input, maze::flood),
-        Some(Mode::Conv) => bin::main(y, input),
+    match opt.mode.unwrap_or(Mode::Maze { alg: Alg::Flood }) {
+        Mode::Maze { alg: Alg::Flood } => maze::main(x, y, input, maze::flood),
+        Mode::Maze { alg: Alg::AStar } => maze::main(x, y, input, maze::astar),
+        Mode::Conv => bin::main(y, input),
     }
 }

@@ -27,10 +27,14 @@
 //!
 //! In terms of visualization (even printing to text) - I don't even try to be efficient.
 
+use std::cmp::Ordering;
 use std::io::BufRead;
 
 mod flood;
 pub use flood::flood;
+
+mod astar;
+pub use astar::astar;
 
 /// Direction from which its needed to approach the field to achieve it with given cost. As it is
 /// possible to have same distance from multiple directions, it is a simple bitset. This is needed,
@@ -41,13 +45,82 @@ struct Dir(u8);
 impl Dir {
     pub const NONE: Dir = Dir(0);
     pub const LEFT: Dir = Dir(1);
-    pub const RIGHT: Dir = Dir(2);
-    pub const UP: Dir = Dir(4);
+    pub const UP: Dir = Dir(2);
+    pub const RIGHT: Dir = Dir(4);
     pub const DOWN: Dir = Dir(8);
     pub const ANY: Dir = Dir(1 | 2 | 4 | 8);
 
     pub fn has_all(&self, Dir(other): Dir) -> bool {
         self.0 & other == other
+    }
+
+    /// Returns directions in which at least one step is needed
+    pub fn vec((from_x, from_y): (usize, usize), (to_x, to_y): (usize, usize)) -> Self {
+        let h = match from_x.cmp(&to_x) {
+            Ordering::Less => Self::LEFT,
+            Ordering::Greater => Self::RIGHT,
+            Ordering::Equal => Self::NONE,
+        };
+        let v = match from_y.cmp(&to_y) {
+            Ordering::Less => Self::UP,
+            Ordering::Greater => Self::DOWN,
+            Ordering::Equal => Self::NONE,
+        };
+
+        h | v
+    }
+
+    /// Rotates left
+    pub fn left(mut self) -> Self {
+        let down = (self.0 & 1) << 3;
+        self.0 >>= 1;
+        self.0 |= down;
+        self
+    }
+
+    /// Rotates right
+    pub fn right(mut self) -> Self {
+        let left = (self.0 & 8) >> 3;
+        self.0 <<= 1;
+        self.0 |= left;
+        self.0 &= 0xf;
+        self
+    }
+
+    /// Returns minimal number of rotations so at least one encoded direction would match every
+    /// given direction at least once
+    pub fn min_rotation(self, other: Self) -> usize {
+        // I have feeling it is strongly suboptimal; Actually as both directions are encoded as 4
+        // bits, just precalculated table would be best solution
+        let mut min = 4;
+        for dir in [Self::LEFT, Self::RIGHT, Self::UP, Self::DOWN].iter() {
+            let mut d = *dir;
+
+            if !self.has_all(d) {
+                continue;
+            }
+
+            let mut o = other.0 & !dir.0;
+            let mut cnt = 0;
+            while o != 0 {
+                cnt += 1;
+                d = d.left();
+                o &= !d.0;
+            }
+            min = std::cmp::min(min, cnt);
+
+            d = *dir;
+            o = other.0 & !dir.0;
+            cnt = 0;
+            while o != 0 {
+                cnt += 1;
+                d = d.right();
+                o &= !d.0;
+            }
+            min = std::cmp::min(min, cnt);
+        }
+
+        min
     }
 }
 
@@ -90,9 +163,8 @@ impl Maze {
         (idx % self.w, idx / self.w)
     }
 
-    /// Returns field in given direction from given one (Wall if no such field)
-    /// If Dir has more than one direction encoded, field with same idx is returned
-    fn in_dir(&self, idx: usize, dir: Dir) -> Field {
+    /// Returns index of field in given direction (defined to be wrapping)
+    fn in_dir_idx(&self, idx: usize, dir: Dir) -> usize {
         let (x, y) = self.coords(idx);
         // Doing wrapping sub basically because maze size is way smaller than my indexing type size
         // (considering >= 16bit machine), so after wrapping I would have invalid field, so Wall by
@@ -104,7 +176,17 @@ impl Maze {
             Dir::RIGHT => (x + 1, y),
             _ => (x, y),
         };
-        self.field(x, y)
+
+        self.idx(x, y)
+    }
+
+    /// Returns field in given direction from given one (Wall if no such field)
+    /// If Dir has more than one direction encoded, field with same idx is returned
+    fn in_dir(&self, idx: usize, dir: Dir) -> Field {
+        self.maze
+            .get(self.in_dir_idx(idx, dir))
+            .copied()
+            .unwrap_or(Field::Wall)
     }
 
     /// Gives field from given coord (Wall if no such field)

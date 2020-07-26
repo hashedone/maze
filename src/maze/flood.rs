@@ -129,9 +129,7 @@ pub fn flood(mut maze: Maze, x: usize, y: usize) -> Maze {
         iteration(&maze, &mut backbuffer, &mut updates);
         std::mem::swap(&mut maze.maze, &mut backbuffer);
         #[cfg(feature = "text_visualize")]
-        {
-            println!("Next iteration:\n\n{}", maze);
-        }
+        println!("Next iteration:\n\n{}", maze);
     }
 
     maze
