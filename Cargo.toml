@@ -11,3 +11,4 @@ default = ["text_visualize"]
 text_visualize = []
 
 [dependencies]
+rayon = "1.3"

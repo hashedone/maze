@@ -23,21 +23,56 @@ use std::io::BufRead;
 mod flood;
 pub use flood::flood;
 
+/// Direction from which its needed to approach the field to achieve it with given cost. As it is
+/// possible to have same distance from multiple directions, it is a simple bitset. This is needed,
+/// as in oru problem cost of next step is dependent on the fact if there is a turn on this step.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Dir(u8);
+
+impl Dir {
+    pub const NONE: Dir = Dir(0);
+    pub const LEFT: Dir = Dir(1);
+    pub const RIGHT: Dir = Dir(2);
+    pub const UP: Dir = Dir(4);
+    pub const DOWN: Dir = Dir(8);
+    pub const ANY: Dir = Dir(1 | 2 | 4 | 8);
+
+    pub fn has_all(&self, Dir(other): Dir) -> bool {
+        self.0 & other == other
+    }
+}
+
+impl std::ops::BitOr for Dir {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
 /// Single field in maze
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Field {
     Empty,
     Wall,
     /// Empty field with known distance from the start of the maze
     /// It doesn't need to be the closes path - it is distance calulated using some path
-    Calculated(usize),
+    Calculated(Dir, usize),
 }
 
 /// Whole maze reprezentation
 pub struct Maze {
     /// All fields flattened
+    ///
+    /// Additionaly  maze is surrounded with extra wall layer, which makes most algorithm easier.
+    /// First of all - any algorithm can just work on submaze indexing from 1, but still assume,
+    /// that every field has all neightbours - as walls are not relevant in terms of pathfinding,
+    /// it doesn't mess up most algorithms.
+    /// Secondly - if algorithm bases on analizys fields already achieved (like most graph
+    /// searches), algorithm can again easly assume, that every field not being wall has all his
+    /// neineightbours.
     maze: Box<[Field]>,
-    /// Width of maze as it is needed for proper addressing
+    /// Width of maze as it is needed for proper addressing (inlcuding external wall)
     w: usize,
 }
 
@@ -47,39 +82,80 @@ impl Maze {
         y * self.w + x
     }
 
+    /// Maps field index to coordinates
+    fn coords(&self, idx: usize) -> (usize, usize) {
+        (idx % self.w, idx / self.w)
+    }
+
+    /// Returns field in given direction from given one (Wall if no such field)
+    /// If Dir has more than one direction encoded, field with same idx is returned
+    fn in_dir(&self, idx: usize, dir: Dir) -> Field {
+        let (x, y) = self.coords(idx);
+        let (x, y) = match dir {
+            Dir::UP => (x, y - 1),
+            Dir::DOWN => (x, y + 1),
+            Dir::LEFT => (x - 1, y),
+            Dir::RIGHT => (x + 1, y),
+            _ => (x, y),
+        };
+        self.field(x, y)
+    }
+
+    /// Gives field from given coord (Wall if no such field)
+    fn field(&self, x: usize, y: usize) -> Field {
+        self.maze
+            .get(self.idx(x, y))
+            .copied()
+            .unwrap_or(Field::Wall)
+    }
+
+    /// Gives mutable field from given coord
+    fn field_mut(&mut self, x: usize, y: usize) -> Option<&mut Field> {
+        self.maze.get_mut(self.idx(x, y))
+    }
+
     /// Creates valid maze from input containing maze description, and x/y dimentions of it
     pub fn from_input(x: usize, y: usize, input: impl BufRead) -> Self {
+        let x = x + 2;
+
         // Iterating over bytes is bad idea, but only interesting charactes are 0 and 1 which
         // happens to be ASCII bytes. I am aware it wont work with any non-ASCII UTF representation
         // of 0 and 1 and "I don't care, what they're going to say..."
         let maze = input
             .lines()
             .take(y)
-            .flat_map(|line| line.unwrap().into_bytes())
+            .flat_map(|line| format!("0{}0", line.unwrap()).into_bytes())
             .map(|field| match field {
                 b'0' => Field::Wall,
                 b'1' => Field::Empty,
                 _ => panic!("Invalid input"),
-            })
+            });
+
+        let maze = std::iter::repeat(Field::Wall)
+            .take(x)
+            .chain(maze)
+            .chain(std::iter::repeat(Field::Wall).take(x))
             .collect();
 
-        Maze {
-            maze,
-            w: x,
-        }
+        Maze { maze, w: x }
     }
 }
 
 #[cfg(feature = "text_visualize")]
 impl std::fmt::Display for Maze {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        for line in self.maze.chunks(self.w) {
+        let h = self.maze.len() / self.w;
+
+        // While printing maze, externall wall is not printed
+        for line in self.maze.chunks(self.w).skip(1).take(h - 2) {
             let line: String = line
                 .into_iter()
+                .skip(1)
+                .take(self.w - 2)
                 .map(|field| match field {
                     Field::Empty => ' ',
                     Field::Wall => '#',
-                    Field::Calculated(distance) => {
+                    Field::Calculated(_, distance) => {
                         (distance % 10).to_string().chars().last().unwrap()
                     }
                 })
@@ -101,15 +177,28 @@ impl std::fmt::Display for Maze {
 /// considered to be an "initial cost" of entering into the maze with this input, and additionally
 /// a field where we algorithm is looking path to. Returned maze contains exit field calculated to
 /// the closest path, and some another field calculated to have "at least this good" path.
-pub fn main(x: usize, y: usize, input: impl BufRead, calculator: impl Fn(Maze, usize, usize) -> Maze) {
+///
+/// If there is no path to given exit, calculator should return maze with not calculated exit field
+pub fn main(
+    x: usize,
+    y: usize,
+    input: impl BufRead,
+    calculator: impl Fn(Maze, usize, usize) -> Maze,
+) {
     let mut maze = Maze::from_input(x, y, input);
-    maze.maze[maze.idx(0, 1)] = Field::Calculated(0);
+    *maze.field_mut(1, 2).unwrap() = Field::Calculated(Dir::ANY, 0);
 
     #[cfg(feature = "text_visualize")]
     println!("Initial maze:\n\n{}\n", maze);
 
-    let maze = calculator(maze, x - 1, y - 2);
+    let maze = calculator(maze, x, y - 1);
 
-    #[cfg(feature= "text_visualize")]
+    #[cfg(feature = "text_visualize")]
     println!("Calculated maze:\n\n{}\n", maze);
+
+    match maze.field(x, y - 1) {
+        Field::Empty => println!("UNREACHABLE"),
+        Field::Wall => println!("INVALID"),
+        Field::Calculated(_, cost) => println!("{}", cost),
+    }
 }
