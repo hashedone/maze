@@ -13,6 +13,7 @@
 
 use std::io::{stdin, BufRead, BufReader};
 
+mod bin;
 mod maze;
 
 /// Takes buffered raed and just parses the first line as it is just metadata (and is probably
@@ -34,5 +35,5 @@ fn main() {
 
     let (x, y) = read_xy(&mut input);
 
-    maze::main(x, y, input, maze::flood);
+    bin::main(y, input);
 }
