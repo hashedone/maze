@@ -13,8 +13,17 @@
 //! but on SISD arch it should behave pretty nicely (it could be probably improved by using some
 //! more sophisticated algo like double ended A*, but I am lazy - to much work not showing too
 //! much, if I would really find more time I would rather try to do something more interesting -
-//! visualization, or kind of optimization for SSE/MMX - but I don't believe I would find
-//! motivation for that).
+//! visualization, or kind of optimization - but I don't believe I would find motivation for that).
+//!
+//! I figured out additional "approach" (except taking completely different search algo). Maze
+//! could be easly preprocessed to directed graph, where each cell (so actually non wall maze field)
+//! has connection to the closest path crossing, and then running any pathfinding alg on that.
+//! Benefit of that is that pathfinding itself is performed on strongly reduced graph, downside is
+//! obviously need of preprocessing (not this much - possible to be done in O(x * y), but every
+//! field have to be visited, while most reasonable finding algorithms avoids visiting every
+//! field). The problem that if exit is not on the crossing then there is no incomming path to it
+//! is actually not difficult to solve - simple raycast from exit can be done to find all fields
+//! "connected" to exit (O(x + y)).
 //!
 //! In terms of visualization (even printing to text) - I don't even try to be efficient.
 

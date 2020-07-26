@@ -53,6 +53,11 @@ fn iteration(input: &Maze, output: &mut [Field], updates: &mut [Option<usize>]) 
     let output = output.par_iter_mut();
     let updates = updates.par_iter_mut();
 
+    // After all I figured out, that the whole calculation could be splitted even more - instead of
+    // "per field", it could be "per field per direction" and after all merged - adding to that
+    // filtering walls outside of "kernel" it would remove internal loop and reduce need of
+    // branching in kernel (however branching would be moved to "merging" phase - I leave it as
+    // possible improvement, but I would not spend more time on that.
     output
         .zip(updates)
         .enumerate()
