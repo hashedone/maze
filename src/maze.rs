@@ -63,14 +63,6 @@ enum Field {
 /// Whole maze reprezentation
 pub struct Maze {
     /// All fields flattened
-    ///
-    /// Additionaly  maze is surrounded with extra wall layer, which makes most algorithm easier.
-    /// First of all - any algorithm can just work on submaze indexing from 1, but still assume,
-    /// that every field has all neightbours - as walls are not relevant in terms of pathfinding,
-    /// it doesn't mess up most algorithms.
-    /// Secondly - if algorithm bases on analizys fields already achieved (like most graph
-    /// searches), algorithm can again easly assume, that every field not being wall has all his
-    /// neineightbours.
     maze: Box<[Field]>,
     /// Width of maze as it is needed for proper addressing (inlcuding external wall)
     w: usize,
@@ -79,7 +71,9 @@ pub struct Maze {
 impl Maze {
     /// Maps coord to field index
     fn idx(&self, x: usize, y: usize) -> usize {
-        y * self.w + x
+        // On overflow just give invalid (too big) index - anything from here would be wall by
+        // default which is simplification on purpose
+        y.saturating_mul(self.w).saturating_add(x)
     }
 
     /// Maps field index to coordinates
@@ -91,10 +85,13 @@ impl Maze {
     /// If Dir has more than one direction encoded, field with same idx is returned
     fn in_dir(&self, idx: usize, dir: Dir) -> Field {
         let (x, y) = self.coords(idx);
+        // Doing wrapping sub basically because maze size is way smaller than my indexing type size
+        // (considering >= 16bit machine), so after wrapping I would have invalid field, so Wall by
+        // default
         let (x, y) = match dir {
-            Dir::UP => (x, y - 1),
+            Dir::UP => (x, y.wrapping_sub(1)),
             Dir::DOWN => (x, y + 1),
-            Dir::LEFT => (x - 1, y),
+            Dir::LEFT => (x.wrapping_sub(1), y),
             Dir::RIGHT => (x + 1, y),
             _ => (x, y),
         };
@@ -116,25 +113,18 @@ impl Maze {
 
     /// Creates valid maze from input containing maze description, and x/y dimentions of it
     pub fn from_input(x: usize, y: usize, input: impl BufRead) -> Self {
-        let x = x + 2;
-
         // Iterating over bytes is bad idea, but only interesting charactes are 0 and 1 which
         // happens to be ASCII bytes. I am aware it wont work with any non-ASCII UTF representation
         // of 0 and 1 and "I don't care, what they're going to say..."
         let maze = input
             .lines()
             .take(y)
-            .flat_map(|line| format!("0{}0", line.unwrap()).into_bytes())
+            .flat_map(|line| format!("{}", line.unwrap()).into_bytes())
             .map(|field| match field {
                 b'0' => Field::Wall,
                 b'1' => Field::Empty,
                 _ => panic!("Invalid input"),
-            });
-
-        let maze = std::iter::repeat(Field::Wall)
-            .take(x)
-            .chain(maze)
-            .chain(std::iter::repeat(Field::Wall).take(x))
+            })
             .collect();
 
         Maze { maze, w: x }
@@ -144,14 +134,10 @@ impl Maze {
 #[cfg(feature = "text_visualize")]
 impl std::fmt::Display for Maze {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let h = self.maze.len() / self.w;
-
         // While printing maze, externall wall is not printed
-        for line in self.maze.chunks(self.w).skip(1).take(h - 2) {
+        for line in self.maze.chunks(self.w) {
             let line: String = line
-                .into_iter()
-                .skip(1)
-                .take(self.w - 2)
+                .iter()
                 .map(|field| match field {
                     Field::Empty => ' ',
                     Field::Wall => '#',
@@ -186,17 +172,17 @@ pub fn main(
     calculator: impl Fn(Maze, usize, usize) -> Maze,
 ) {
     let mut maze = Maze::from_input(x, y, input);
-    *maze.field_mut(1, 2).unwrap() = Field::Calculated(Dir::ANY, 0);
+    *maze.field_mut(0, 1).unwrap() = Field::Calculated(Dir::ANY, 0);
 
     #[cfg(feature = "text_visualize")]
     println!("Initial maze:\n\n{}\n", maze);
 
-    let maze = calculator(maze, x, y - 1);
+    let maze = calculator(maze, x - 1, y - 2);
 
     #[cfg(feature = "text_visualize")]
     println!("Calculated maze:\n\n{}\n", maze);
 
-    match maze.field(x, y - 1) {
+    match maze.field(x - 1, y - 2) {
         Field::Empty => println!("UNREACHABLE"),
         Field::Wall => println!("INVALID"),
         Field::Calculated(_, cost) => println!("{}", cost),
