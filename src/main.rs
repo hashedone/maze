@@ -12,9 +12,25 @@
 //! error handling - if I would find additional time, I would do something funny.
 
 use std::io::{stdin, BufRead, BufReader};
+use structopt::StructOpt;
 
 mod bin;
 mod maze;
+
+#[derive(Debug, StructOpt)]
+enum Mode {
+    #[structopt(about = "Finds closest path in maze (default)")]
+    Maze,
+    #[structopt(about = "Performs BIN -> DEC convetsion")]
+    Conv,
+}
+
+#[derive(Debug, StructOpt)]
+#[structopt(name = "fun_with_mazes", about = "Do you want to play a game?")]
+struct Opt {
+    #[structopt(subcommand)]
+    mode: Option<Mode>,
+}
 
 /// Takes buffered raed and just parses the first line as it is just metadata (and is probably
 /// irrelevant as lines are separated with `\n`, and assumption of reading until EOF should be good
@@ -31,9 +47,13 @@ fn read_xy(input: &mut impl BufRead) -> (usize, usize) {
 }
 
 fn main() {
-    let mut input = BufReader::new(stdin());
+    let opt = Opt::from_args();
 
+    let mut input = BufReader::new(stdin());
     let (x, y) = read_xy(&mut input);
 
-    bin::main(y, input);
+    match opt.mode {
+        None | Some(Mode::Maze) => maze::main(x, y, input, maze::flood),
+        Some(Mode::Conv) => bin::main(y, input),
+    }
 }

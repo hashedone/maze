@@ -11,5 +11,6 @@ default = ["text_visualize"]
 text_visualize = []
 
 [dependencies]
+structopt = "0.3"
 rayon = "1.3"
 num-bigint = "0.3"
