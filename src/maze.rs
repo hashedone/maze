@@ -210,7 +210,7 @@ impl Maze {
         let maze = input
             .lines()
             .take(y)
-            .flat_map(|line| format!("{}", line.unwrap()).into_bytes())
+            .flat_map(|line| line.unwrap().into_bytes())
             .map(|field| match field {
                 b'0' => Field::Wall,
                 b'1' => Field::Empty,

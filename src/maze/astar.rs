@@ -26,93 +26,103 @@ impl std::cmp::Ord for QueueItem {
     }
 }
 
+struct AStar {
+    maze: Maze,
+    queue: BinaryHeap<QueueItem>,
+    exit: (usize, usize),
+}
+
+impl AStar {
+    fn new(maze: Maze, x: usize, y: usize) -> Self {
+        let queue: BinaryHeap<_> = maze
+            .maze
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, field)| match field {
+                Field::Calculated(dir, cost) => {
+                    let v = Dir::vec((x, y), maze.coords(idx));
+                    let rotations = dir.min_rotation(v);
+                    Some(QueueItem {
+                        cost: *cost + rotations,
+                        idx,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+
+        Self {
+            queue,
+            maze,
+            exit: (x, y),
+        }
+    }
+
+    fn enqueue(&mut self, idx: usize) {
+        if let Field::Calculated(dir, cost) = self.maze.maze[idx] {
+            let v = Dir::vec(self.maze.coords(idx), self.exit);
+            let rotations = dir.min_rotation(v);
+            self.queue.push(QueueItem {
+                cost: cost + rotations,
+                idx,
+            })
+        }
+    }
+
+    fn run(mut self) -> Maze {
+        let dirs = [
+            (Dir::LEFT, Dir::RIGHT),
+            (Dir::RIGHT, Dir::LEFT),
+            (Dir::UP, Dir::DOWN),
+            (Dir::DOWN, Dir::UP),
+        ];
+
+        while let Some(QueueItem { idx, .. }) = self.queue.pop() {
+            let field = self.maze.maze[idx];
+
+            for (from, to) in dirs.iter() {
+                let cost = match field {
+                    Field::Calculated(dir, cost) => cost + (!dir.has_all(*from) as usize),
+                    _ => continue,
+                };
+
+                let next_idx = self.maze.in_dir_idx(idx, *to);
+                match self.maze.maze.get(next_idx).copied().unwrap_or(Field::Wall) {
+                    Field::Calculated(dir, pcost) if pcost == cost => {
+                        self.maze.maze[next_idx] = Field::Calculated(dir | *from, cost);
+                        self.enqueue(next_idx);
+                    }
+                    Field::Calculated(_, pcost) if cost < pcost => {
+                        self.maze.maze[next_idx] = Field::Calculated(*from, cost);
+                        self.enqueue(next_idx);
+                    }
+                    Field::Empty => {
+                        self.maze.maze[next_idx] = Field::Calculated(*from, cost);
+                        self.enqueue(next_idx);
+                    }
+                    _ => (),
+                }
+            }
+
+            #[cfg(feature = "text_visualize")]
+            println!("Next iteration:\n\n{}", self.maze);
+
+            let (x, y) = self.exit;
+            if let Field::Calculated(_, _) = self.maze.field(x, y) {
+                break;
+            }
+        }
+
+        self.maze
+    }
+}
+
 /// Implementation of A* search algorithm
 ///
 /// As an argument it takes initial maze, with at least one field with known distance - which is
 /// considered to be an "initial cost" of entering into the maze with this input, and additionally
 /// a field where we algorithm is looking path to. Returned maze contains exit field calculated to
 /// the closest path, and some another field calculated to have "at least this good" path.
-pub fn astar(mut maze: Maze, x: usize, y: usize) -> Maze {
-    let dirs = [
-        (Dir::LEFT, Dir::RIGHT),
-        (Dir::RIGHT, Dir::LEFT),
-        (Dir::UP, Dir::DOWN),
-        (Dir::DOWN, Dir::UP),
-    ];
-
-    let mut queue: BinaryHeap<_> = maze
-        .maze
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, field)| match field {
-            Field::Calculated(dir, cost) => {
-                let v = Dir::vec((x, y), maze.coords(idx));
-                let rotations = dir.min_rotation(v);
-                Some(QueueItem {
-                    cost: *cost + rotations,
-                    idx,
-                })
-            }
-            _ => None,
-        })
-        .collect();
-
-    while let Some(QueueItem { idx, cost, .. }) = queue.pop() {
-        let field = maze.maze[idx];
-        #[cfg(feature = "text_visualize")]
-        println!(
-            "Expanding field {:?} ({:?}), expected cost: {}",
-            maze.coords(idx),
-            field,
-            cost
-        );
-
-        for (from, to) in dirs.iter() {
-            let cost = match field {
-                Field::Calculated(dir, cost) => cost + (!dir.has_all(*from) as usize),
-                _ => continue,
-            };
-
-            let next_idx = maze.in_dir_idx(idx, *to);
-            match maze.maze.get(next_idx).copied().unwrap_or(Field::Wall) {
-                Field::Calculated(dir, pcost) if pcost == cost => {
-                    maze.maze[next_idx] = Field::Calculated(dir | *from, cost);
-                    let v = Dir::vec(maze.coords(next_idx), (x, y));
-                    let rotations = (dir | *from).min_rotation(v);
-                    queue.push(QueueItem {
-                        cost: cost + rotations,
-                        idx: next_idx,
-                    })
-                }
-                Field::Calculated(_, pcost) if cost < pcost => {
-                    maze.maze[next_idx] = Field::Calculated(*from, cost);
-                    let v = Dir::vec(maze.coords(next_idx), (x, y));
-                    let rotations = from.min_rotation(v);
-                    queue.push(QueueItem {
-                        cost: cost + rotations,
-                        idx: next_idx,
-                    })
-                }
-                Field::Empty => {
-                    maze.maze[next_idx] = Field::Calculated(*from, cost);
-                    let v = Dir::vec(maze.coords(next_idx), (x, y));
-                    let rotations = from.min_rotation(v);
-                    queue.push(QueueItem {
-                        cost: cost + rotations,
-                        idx: next_idx,
-                    })
-                }
-                _ => (),
-            }
-        }
-
-        #[cfg(feature = "text_visualize")]
-        println!("Next iteration:\n\n{}", maze);
-
-        if let Field::Calculated(_, _) = maze.field(x, y) {
-            break;
-        }
-    }
-
-    maze
+pub fn astar(maze: Maze, x: usize, y: usize) -> Maze {
+    AStar::new(maze, x, y).run()
 }
